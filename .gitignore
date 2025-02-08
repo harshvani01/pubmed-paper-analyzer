@@ -11,3 +11,6 @@ __pycache__/
 
 # Ignore data folder (if not needed in the repo)
 data/
+
+# Ignore the logs too .
+logs/
