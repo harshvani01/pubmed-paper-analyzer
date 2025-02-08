@@ -1,0 +1,13 @@
+# Ignore virtual environment
+pubmed_analyzer_env/
+
+# Ignore Python cache files
+__pycache__/
+*.pyc
+
+# Ignore IDE files
+.vscode/
+.idea/
+
+# Ignore data folder (if not needed in the repo)
+data/
