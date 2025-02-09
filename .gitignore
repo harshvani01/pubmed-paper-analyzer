@@ -11,3 +11,9 @@ __pycache__/
 
 # Ignore data folder (if not needed in the repo)
 data/
+
+# Ignore the logs too
+logs/
+
+# Ignore the .DS_Store
+**/.DS_Store
