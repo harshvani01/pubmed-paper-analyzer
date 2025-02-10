@@ -145,7 +145,7 @@ def process_pubmed_url(pubmed_url):
     if not pdf_downloaded:
         logging.error(f"Failed to download any PDF for {pubmed_url}")
 
-def downloader_logic():
+def bulk_download():
     urls = load_urls()
     if not urls:
         logging.error("No URLs found, exiting.")
@@ -158,4 +158,4 @@ def downloader_logic():
     logging.info("Process completed.")
 
 if __name__ == "__main__":
-    downloader_logic()
+    bulk_download()

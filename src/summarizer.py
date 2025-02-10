@@ -7,11 +7,13 @@ from concurrent.futures import ThreadPoolExecutor
 # Configure logging
 # Get the directory where this script is located
 # Get the absolute path of the project's root directory
+# Directories
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # Moves up from src/
 LOG_DIR = os.path.join(BASE_DIR, "logs")  # Ensure logs stay inside project
 SUMMARIES_DIR = os.path.join(BASE_DIR, "data/summaries")  # Ensure summaries stay inside project
-# Directories
 RAW_PAPERS_DIR = os.path.join(BASE_DIR, "data/papers")
+
+# Constants
 CHUNK_SIZE = 500
 
 
@@ -21,7 +23,6 @@ os.makedirs(LOG_DIR, exist_ok=True)
 os.makedirs(RAW_PAPERS_DIR, exist_ok=True)
 
 # Configure logging
-import logging
 logging.basicConfig(
     filename=os.path.join(LOG_DIR, "summarizer.log"),
     level=logging.INFO,
