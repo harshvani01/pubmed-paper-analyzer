@@ -1,90 +1,120 @@
 import fitz  # PyMuPDF
-from transformers import pipeline
 import os
 import logging
+from transformers import pipeline
+from concurrent.futures import ThreadPoolExecutor
 
 # Configure logging
-logging.basicConfig(filename="../logs/summarizer.log", level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-
+# Get the directory where this script is located
+# Get the absolute path of the project's root directory
 # Directories
-RAW_PAPERS_DIR = "../data/papers"
-SUMMARIES_DIR = "../data/summaries"
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # Moves up from src/
+LOG_DIR = os.path.join(BASE_DIR, "logs")  # Ensure logs stay inside project
+SUMMARIES_DIR = os.path.join(BASE_DIR, "data/summaries")  # Ensure summaries stay inside project
+RAW_PAPERS_DIR = os.path.join(BASE_DIR, "data/papers")
+
+# Constants
+CHUNK_SIZE = 500
+
+
+# Ensure directories exist
+os.makedirs(SUMMARIES_DIR, exist_ok=True)
+os.makedirs(LOG_DIR, exist_ok=True)
+os.makedirs(RAW_PAPERS_DIR, exist_ok=True)
+
+# Configure logging
+logging.basicConfig(
+    filename=os.path.join(LOG_DIR, "summarizer.log"),
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
+
+logging.info("Successfully initiated logging")
 
 # Initialize summarization pipeline
-summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
+try:
+    summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
+except Exception as e:
+    logging.error(f"Failed to initialize summarizer: {e}")
+    raise SystemExit("Error: Summarization pipeline failed to load.")
 
-def extract_text_from_pdf(pdf_path):
-    """ Extracts text from a PDF file. """
+def extract_text_from_pdf(pdf_path, chunk_size=CHUNK_SIZE):
     try:
         doc = fitz.open(pdf_path)
-        text = ""
-        for page in doc:
-            text += page.get_text()
-        return text
+
+        text = " ".join([page.get_text().strip() for page in doc if page.get_text().strip()])
+
+        if not text:
+            logging.error(f"PDF {pdf_path} contains no extractable text.")
+            return None
+
+        words = text.split()
+        chunks = [" ".join(words[i:i + chunk_size]) for i in range(0, len(words), chunk_size)]
+        return [chunk for chunk in chunks if len(chunk.split()) >= 50]
     except Exception as e:
         logging.error(f"Error extracting text from {pdf_path}: {e}")
         return None
 
-def summarize_text(text, max_length=250):
-    """ Generates a summary of the given text. """
-    try:
-        # Truncate text to fit within the model's token limit
-        truncated_text = " ".join(text.split()[:1000])
-        summary = summarizer(truncated_text, max_length=max_length, min_length=30, do_sample=False)
-        return summary[0]['summary_text']
-    except Exception as e:
-        logging.error(f"Error summarizing text: {e}")
-        return None
+
+
+def summarize_text_chunks(chunks, max_length=250):
+    summaries = []
+    for i, chunk in enumerate(chunks):
+        try:
+            if len(chunk.split()) < 50:
+                logging.warning(f"Skipping short chunk ({len(chunk.split())} words).")
+                continue
+
+            chunk = " ".join(chunk.split()[:CHUNK_SIZE])  # Limit chunk size
+            summary = summarizer(chunk, max_length=max_length, min_length=30, do_sample=False)
+            summaries.append(summary[0]['summary_text'])
+        except Exception as e:
+            logging.error(f"Error summarizing text chunk {i}: {e}")
+    return " ".join(summaries) if summaries else None
 
 def summarize_paper(pdf_path):
     """ Summarizes a paper given its PDF path. """
-    if not os.path.exists(pdf_path):
-        logging.error(f"PDF file not found: {pdf_path}")
-        return None
+    pubmed_id = os.path.basename(pdf_path).replace(".pdf", "")
+    summary_path = os.path.join(SUMMARIES_DIR, f"{pubmed_id}_summary.txt")
 
-    # Extract text from PDF
-    text = extract_text_from_pdf(pdf_path)
-    if not text:
-        logging.error(f"No text extracted from {pdf_path}")
-        return None
-
-    # Generate summary
-    summary = summarize_text(text)
-    if not summary:
-        logging.error(f"Failed to generate summary for {pdf_path}")
-        return None
-
-    return summary
-
-def save_summary(pubmed_id, summary):
-    """ Saves the summary to a file. """
-    if not os.path.exists(SUMMARIES_DIR):
-        os.makedirs(SUMMARIES_DIR)
-
-    summary_file = os.path.join(SUMMARIES_DIR, f"{pubmed_id}_summary.txt")
-    with open(summary_file, "w") as f:
-        f.write(summary)
-    logging.info(f"Summary saved: {summary_file}")
-
-def bulk_summarize():
-    """ Summarizes all papers in the raw papers directory. """
-    if not os.path.exists(RAW_PAPERS_DIR):
-        logging.error(f"Raw papers directory not found: {RAW_PAPERS_DIR}")
+    if os.path.exists(summary_path):
+        logging.info(f"Skipping {pubmed_id}, summary already exists.")
         return
 
-    for filename in os.listdir(RAW_PAPERS_DIR):
-        if filename.endswith(".pdf"):
-            pubmed_id = filename.split(".")[0]  # Extract PubMed ID from filename
-            pdf_path = os.path.join(RAW_PAPERS_DIR, filename)
+    logging.info(f"Summarizing: {pdf_path}")
 
-            # Summarize the paper
-            summary = summarize_paper(pdf_path)
-            if not summary:
-                logging.error(f"Skipping {filename}: Failed to generate summary")
-                continue
+    text_chunks = extract_text_from_pdf(pdf_path)
+    if not text_chunks:
+        logging.error(f"No valid text extracted from {pdf_path}, skipping.")
+        return
+    
+    summary = summarize_text_chunks(text_chunks)
+    if not summary:
+        logging.error(f"Failed to generate summary for {pdf_path}, skipping.")
+        return
+    
+    with open(summary_path, "w") as f:
+        f.write(summary)
 
-            # Save the summary
-            save_summary(pubmed_id, summary)
+    logging.info(f"Summary saved: {summary_path}")
+
+
+
+def bulk_summarize():
+    """ Summarizes all papers in parallel. """
+    pdf_files = [os.path.join(RAW_PAPERS_DIR, f) for f in os.listdir(RAW_PAPERS_DIR) if f.endswith(".pdf")]
+    
+    if not pdf_files:
+        logging.error(f"No PDFs found in {RAW_PAPERS_DIR}.")
+        return
+    
+    MAX_THREADS = 3
+    with ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
+        executor.map(summarize_paper, pdf_files)
+
+    logging.info("Bulk summarization completed.")
+
 
 if __name__ == "__main__":
+   #  summarize_paper("/Users/hvani/personal/project/pubmed-paper-analyzer/data/papers/39368806.pdf")
     bulk_summarize()
